@@ -20,11 +20,13 @@ fn main() {
     let mut last_mouse = rl.get_mouse_position();
 
     // Cube state
-    let cube_pos = Vector3::new(0.0, 0.5, 0.0);
     let cube_size = 1.0f32;
+    // Lower the ground slightly to avoid z-fighting with the shadow
+    let ground_y = -0.02f32;
+    let cube_pos = Vector3::new(0.0, ground_y + cube_size / 2.0, 0.0);
 
-    // Light direction (world space) - pointing downwards
-    let light_dir = normalize(Vector3::new(-1.0, -2.0, -0.5));
+    // Light direction (world space) - fixed directional light (tuned to look like image)
+    let light_dir = normalize(Vector3::new(-0.6, -1.0, -0.3));
 
     while !rl.window_should_close() {
         // Mouse input
@@ -85,8 +87,12 @@ fn main() {
 
         let mut d3 = d.begin_mode3D(camera);
 
-        // Ground
-        d3.draw_plane(Vector3::new(0.0, 0.0, 0.0), Vector2::new(50.0, 50.0), Color::LIGHTGRAY);
+        // Ground (green) placed slightly lower to avoid collision with shadow
+        d3.draw_plane(
+            Vector3::new(0.0, ground_y, 0.0),
+            Vector2::new(50.0, 50.0),
+            Color::new(80, 180, 80, 255),
+        );
 
         // Compute projected shadow of cube onto ground plane (y = 0) using light direction
         // Project the 8 cube vertices along light_dir to y = 0, then compute convex hull in XZ and draw triangles
@@ -112,13 +118,14 @@ fn main() {
             // projected point: v - light_dir * s
             let px = v.x - light_dir.x * s;
             let pz = v.z - light_dir.z * s;
-            proj_points.push((px, 0.01, pz));
+            // store projection (y set near ground)
+            proj_points.push((px, ground_y + 0.001, pz));
         }
 
         // Convex hull in XZ
         let hull = convex_hull_xz(&proj_points);
         if hull.len() >= 3 {
-            // compute centroid
+            // compute centroid (XZ)
             let mut cx = 0.0f32;
             let mut cz = 0.0f32;
             for (x, _y, z) in hull.iter() {
@@ -127,23 +134,80 @@ fn main() {
             }
             cx /= hull.len() as f32;
             cz /= hull.len() as f32;
-            let center = Vector3::new(cx, 0.02, cz);
-            // draw fan triangles
-            for i in 0..hull.len() {
-                let (x1, _y1, z1) = hull[i];
-                let (x2, _y2, z2) = hull[(i + 1) % hull.len()];
-                let p1 = Vector3::new(x1, 0.02, z1);
-                let p2 = Vector3::new(x2, 0.02, z2);
-                d3.draw_triangle3D(center, p1, p2, Color::new(200, 0, 0, 140));
+
+            // Draw multiple layered fans to approximate soft penumbra and extend shadow outside the cube
+            let layers = 8;
+            for layer in 0..layers {
+                let t = layer as f32 / (layers as f32);
+                // inner layers darker, outer layers lighter
+                let alpha_f = (160.0 * (1.0 - t)) + 30.0;
+                let alpha = alpha_f.clamp(10.0, 255.0) as u8;
+                // scale hull outwards for softer edge and larger footprint
+                let scale = 1.0 + t * 0.7;
+                for i in 0..hull.len() {
+                    let (x1, _y1, z1) = hull[i];
+                    let (x2, _y2, z2) = hull[(i + 1) % hull.len()];
+                    let dir1 = Vector3::new(x1 - cx, 0.0, z1 - cz);
+                    let dir2 = Vector3::new(x2 - cx, 0.0, z2 - cz);
+                    // Place shadow exactly on the ground (or very close) so it appears below the cube
+                    let p1 = Vector3::new(cx + dir1.x * scale, 0.001, cz + dir1.z * scale);
+                    let p2 = Vector3::new(cx + dir2.x * scale, 0.001, cz + dir2.z * scale);
+                    let center_on_ground = Vector3::new(cx, 0.001, cz);
+                    // draw shadow layer with dark bluish tint to contrast green floor
+                    d3.draw_triangle3D(center_on_ground, p1, p2, Color::new(10, 10, 30, alpha));
+                }
             }
         }
 
-        // Cube (red)
-        d3.draw_cube(cube_pos, cube_size, cube_size, cube_size, Color::new(200, 50, 50, 255));
+        // Draw cube by faces and shade per-face using simple Lambertian with our light_dir
+        // Build cube vertices
+        let half = cube_size / 2.0;
+        let v0 = Vector3::new(cube_pos.x - half, cube_pos.y - half, cube_pos.z - half);
+        let v1 = Vector3::new(cube_pos.x - half, cube_pos.y - half, cube_pos.z + half);
+        let v2 = Vector3::new(cube_pos.x + half, cube_pos.y - half, cube_pos.z - half);
+        let v3 = Vector3::new(cube_pos.x + half, cube_pos.y - half, cube_pos.z + half);
+        let v4 = Vector3::new(cube_pos.x - half, cube_pos.y + half, cube_pos.z - half);
+        let v5 = Vector3::new(cube_pos.x - half, cube_pos.y + half, cube_pos.z + half);
+        let v6 = Vector3::new(cube_pos.x + half, cube_pos.y + half, cube_pos.z - half);
+        let v7 = Vector3::new(cube_pos.x + half, cube_pos.y + half, cube_pos.z + half);
+
+        // Faces as quads: each face -> 4 indices (a,b,c,d)
+        let faces = vec![
+            // bottom
+            (v0, v2, v3, v1),
+            // top
+            (v4, v5, v7, v6),
+            // left
+            (v0, v1, v5, v4),
+            // right
+            (v2, v6, v7, v3),
+            // back
+            (v0, v4, v6, v2),
+            // front
+            (v1, v3, v7, v5),
+        ];
+
+        let base = (200u8, 40u8, 40u8);
+        for (a, b, c, d) in faces.iter() {
+            // compute normal
+            let edge1 = sub(*b, *a);
+            let edge2 = sub(*c, *a);
+            let normal = normalize(cross(edge1, edge2));
+            // lambertian: use dot between normal and -light_dir
+            let lit = 0.15 + 0.85 * dot(normal, mult(light_dir, -1.0)).max(0.0);
+            let r = (base.0 as f32 * lit).clamp(0.0, 255.0) as u8;
+            let g = (base.1 as f32 * lit).clamp(0.0, 255.0) as u8;
+            let bcol = (base.2 as f32 * lit).clamp(0.0, 255.0) as u8;
+            let color = Color::new(r, g, bcol, 255);
+            // draw two triangles a,b,c and a,c,d
+            d3.draw_triangle3D(*a, *b, *c, color);
+            d3.draw_triangle3D(*a, *c, *d, color);
+        }
+
+        // Outline
         d3.draw_cube_wires(cube_pos, cube_size, cube_size, cube_size, Color::BLACK);
 
-        // Helper grid and origin
-        d3.draw_grid(20, 1.0);
+    // (grid removed for cleaner look)
 
         drop(d3);
 
