@@ -1,5 +1,9 @@
 use bevy::prelude::*;
+use bevy::render::render_resource::Extent3d;
+use bevy::render::texture::Image;
 use bevy::input::mouse::{MouseMotion, MouseWheel};
+use std::fs::read;
+use image::GenericImageView;
 
 fn main() {
     App::new()
@@ -22,15 +26,56 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
 ) {
-    // Red cube (shadow caster)
+
+    // Prefer to load PNG via AssetServer. If only a JPG exists we convert it at runtime to a temporary PNG
+    // so AssetServer can load it (avoids depending on a jpg AssetLoader at compile-time).
+    let jpg_path = "assets/cube_texture.jpg";
+    let png_tmp_path = "assets/_cube_texture_tmp.png";
+    let texture_handle = if std::path::Path::new(jpg_path).exists() {
+        // try to convert JPG -> PNG and save temporary PNG
+        match read(jpg_path) {
+            Ok(bytes) => match image::load_from_memory(&bytes) {
+                Ok(img) => {
+                    if let Err(e) = img.save(png_tmp_path) {
+                        warn!("Failed to write temporary PNG: {}", e);
+                        // fallback: let asset_server try the jpg directly
+                        asset_server.load("cube_texture.jpg")
+                    } else {
+                        // Load the temporary PNG via AssetServer (PNG loader is usually available)
+                        let handle = asset_server.load("_cube_texture_tmp.png");
+                        // DO NOT delete the temporary PNG immediately — AssetServer loads asynchronously and
+                        // will need the file available. The temp file can be removed manually later if desired.
+                        handle
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to decode cube_texture.jpg: {}", e);
+                    asset_server.load("cube_texture.jpg")
+                }
+            },
+            Err(e) => {
+                warn!("Failed to read assets/cube_texture.jpg: {}", e);
+                asset_server.load("cube_texture.jpg")
+            }
+        }
+    } else {
+        // No JPG present — try PNG or whatever the asset server supports directly
+        asset_server.load("cube_texture.png")
+    };
+
+    // Create a material that uses the texture handle
+    let material_handle = materials.add(StandardMaterial {
+        base_color_texture: Some(texture_handle.clone()),
+        perceptual_roughness: 0.9,
+        ..Default::default()
+    });
+
+    // Textured cube (shadow caster)
     commands.spawn(PbrBundle {
         mesh: meshes.add(Mesh::from(shape::Cube { size: 1.0 })),
-        material: materials.add(StandardMaterial {
-            base_color: Color::rgb(0.7, 0.1, 0.1),
-            perceptual_roughness: 0.9,
-            ..Default::default()
-        }),
+        material: material_handle,
         transform: Transform::from_xyz(0.0, 0.5, 0.0),
         ..Default::default()
     });
