@@ -10,6 +10,7 @@ fn main() {
     .add_plugins(DefaultPlugins)
     .add_systems(Startup, setup)
     .add_systems(Update, orbit_camera_system)
+    .add_systems(Update, grass_follow_system)
         .run();
 }
 
@@ -22,32 +23,10 @@ struct OrbitCamera {
     pub rotating: bool,
 }
 
-fn make_image<F>(width: u32, height: u32, mut f: F) -> BevyImage
-where
-    F: FnMut(u32, u32) -> [u8; 4],
-{
-    let mut data = Vec::with_capacity((width * height * 4) as usize);
-    for y in 0..height {
-        for x in 0..width {
-            let px = f(x, y);
-            data.push(px[0]);
-            data.push(px[1]);
-            data.push(px[2]);
-            data.push(px[3]);
-        }
-    }
+#[derive(Component)]
+struct InfiniteGrass;
 
-    BevyImage::new(
-        Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        data,
-        TextureFormat::Rgba8UnormSrgb,
-    )
-}
+// (removed unused helper make_image; we generate/supply high-res images via make_and_save)
 
 fn setup(
     mut commands: Commands,
@@ -97,7 +76,7 @@ fn setup(
     }
 
     // grass: layered noise + subtle blades
-    let (grass, grass_path) = make_and_save("high_grass.png", size, size, |x, y| {
+    let (grass, _grass_path) = make_and_save("high_grass.png", size, size, |x, y| {
         let fx = x as f32 / size as f32;
         let fy = y as f32 / size as f32;
         // layered hash noise
@@ -112,7 +91,7 @@ fn setup(
     });
 
     // tronco: vertical grain with sine perturbation and noise
-    let (tronco, tronco_path) = make_and_save("high_tronco.png", size, size, |x, y| {
+    let (tronco, _tronco_path) = make_and_save("high_tronco.png", size, size, |x, y| {
         let fx = x as f32 / 16.0;
         let grain = (fx + (y as f32 / 128.0).sin() * 2.0).sin();
         let base = 90.0 + grain * 40.0;
@@ -124,7 +103,7 @@ fn setup(
     });
 
     // madera: horizontal grain with occasional knots
-    let (madera, madera_path) = make_and_save("high_madera.png", size, size, |x, y| {
+    let (madera, _madera_path) = make_and_save("high_madera.png", size, size, |x, y| {
         let fy = y as f32 / 12.0;
         let grain = (fy + (x as f32 / 200.0).sin() * 1.5).sin();
         let base = 150.0 + grain * 40.0;
@@ -167,119 +146,150 @@ fn setup(
 
     // Shared meshes to reduce GPU uploads
     let cube = meshes.add(Mesh::from(shape::Cube { size: 1.0 }));
-    let plane = meshes.add(Mesh::from(shape::Plane { size: 1.0, subdivisions: 1 }));
 
-    // Floor (large plane) - tiling simulated by scaling the plane and using small texture
-    commands.spawn(PbrBundle {
-        mesh: plane.clone(),
-        material: mat_grass.clone(),
-        transform: Transform::from_scale(Vec3::new(10.0, 1.0, 10.0)).with_translation(Vec3::new(0.0, 0.0, 0.0)),
-        ..Default::default()
-    });
-
-    // Create a rectangular platform (raised) where the house stands
-    commands.spawn(PbrBundle {
-        mesh: cube.clone(),
-        material: mat_madera.clone(),
-        transform: Transform::from_xyz(0.0, 0.25, 0.0).with_scale(Vec3::new(6.0, 0.5, 6.0)),
-        ..Default::default()
-    });
-
-    // Walls - darker wood (tronco) for posts and lighter for planks
-    // Four outer walls using cubes scaled
-    let wall_thickness = 0.3;
-    let wall_height = 2.0;
-    let wall_length = 5.0;
-
-    // Back wall
-    commands.spawn(PbrBundle {
-        mesh: cube.clone(),
-        material: mat_madera.clone(),
-        transform: Transform::from_xyz(0.0, wall_height / 2.0 + 0.5, -wall_length / 2.0)
-            .with_scale(Vec3::new(wall_length, wall_height, wall_thickness)),
-        ..Default::default()
-    });
-
-    // Front wall (with gap for door)
-    commands.spawn(PbrBundle {
-        mesh: cube.clone(),
-        material: mat_madera.clone(),
-        transform: Transform::from_xyz(0.0, wall_height / 2.0 + 0.5, wall_length / 2.0)
-            .with_scale(Vec3::new(wall_length, wall_height, wall_thickness)),
-        ..Default::default()
-    });
-
-    // Left wall
-    commands.spawn(PbrBundle {
-        mesh: cube.clone(),
-        material: mat_madera.clone(),
-        transform: Transform::from_xyz(-wall_length / 2.0, wall_height / 2.0 + 0.5, 0.0)
-            .with_scale(Vec3::new(wall_thickness, wall_height, wall_length)),
-        ..Default::default()
-    });
-
-    // Right wall
-    commands.spawn(PbrBundle {
-        mesh: cube.clone(),
-        material: mat_madera.clone(),
-        transform: Transform::from_xyz(wall_length / 2.0, wall_height / 2.0 + 0.5, 0.0)
-            .with_scale(Vec3::new(wall_thickness, wall_height, wall_length)),
-        ..Default::default()
-    });
-
-    // Posts (tronco) at corners
-    let post_scale = Vec3::new(0.3, wall_height + 0.5, 0.3);
-    let corners = [
-        Vec3::new(-wall_length / 2.0, 0.0, -wall_length / 2.0),
-        Vec3::new(wall_length / 2.0, 0.0, -wall_length / 2.0),
-        Vec3::new(-wall_length / 2.0, 0.0, wall_length / 2.0),
-        Vec3::new(wall_length / 2.0, 0.0, wall_length / 2.0),
-    ];
-    for c in corners {
-        commands.spawn(PbrBundle {
-            mesh: cube.clone(),
-            material: mat_tronco.clone(),
-            transform: Transform::from_translation(Vec3::new(c.x, (wall_height + 0.5) / 2.0 + 0.5, c.z)).with_scale(post_scale),
-            ..Default::default()
-        });
+    // Helper: create a plane mesh with tiled UVs (width along X, depth along Z)
+    fn create_tiled_plane(width: f32, depth: f32, tiles_u: f32, tiles_v: f32) -> Mesh {
+        let hw = width / 2.0;
+        let hd = depth / 2.0;
+        let positions = vec![
+            [-hw, 0.0, -hd],
+            [ hw, 0.0, -hd],
+            [ hw, 0.0,  hd],
+            [-hw, 0.0,  hd],
+        ];
+        let normals = vec![[0.0, 1.0, 0.0]; 4];
+        let uvs = vec![
+            [0.0, 0.0],
+            [tiles_u, 0.0],
+            [tiles_u, tiles_v],
+            [0.0, tiles_v],
+        ];
+        let indices: Vec<u32> = vec![0, 2, 1, 0, 3, 2];
+        let mut mesh = Mesh::new(bevy::render::mesh::PrimitiveTopology::TriangleList);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+        mesh.set_indices(Some(bevy::render::mesh::Indices::U32(indices)));
+        mesh
     }
 
-    // Simple roof: two sloped slabs made from scaled cubes rotated
-    let roof_thickness = 0.2;
-    let roof_length = wall_length + 0.6;
-    let roof_height = 1.2;
+    // Create a tiled ground plane (will be moved to follow camera)
+    let ground_size = 200.0f32;
+    let ground_tiles = 128.0f32; // increase repeats for better detail
+    let ground_mesh = meshes.add(create_tiled_plane(ground_size, ground_size, ground_tiles, ground_tiles));
 
-    // Left roof half
-    commands.spawn(PbrBundle {
-        mesh: cube.clone(),
-        material: mat_tronco.clone(),
-        transform: Transform::from_xyz(0.0, wall_height + roof_height / 2.0 + 0.5, 0.0)
-            .with_rotation(Quat::from_rotation_z(0.35))
-            .with_scale(Vec3::new(roof_length, roof_thickness, 3.5)),
+    // Floor (infinite-looking) - use tiled plane and add marker to follow camera
+    #[derive(Component)]
+    struct InfiniteGrass;
+
+    commands.spawn((PbrBundle {
+        mesh: ground_mesh.clone(),
+        material: mat_grass.clone(),
+        transform: Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
         ..Default::default()
-    });
+    }, InfiniteGrass));
 
-    // Right roof half
-    commands.spawn(PbrBundle {
-        mesh: cube.clone(),
-        material: mat_tronco.clone(),
-        transform: Transform::from_xyz(0.0, wall_height + roof_height / 2.0 + 0.5, 0.0)
-            .with_rotation(Quat::from_rotation_z(-0.35))
-            .with_scale(Vec3::new(roof_length, roof_thickness, 3.5)),
-        ..Default::default()
-    });
-
-    // Simple stairs at front
-    for i in 0..4 {
-        let h = 0.12 + i as f32 * 0.12;
-        let depth = 0.6;
-        commands.spawn(PbrBundle {
+    // Create a parent entity for the house and scale it down to make 'blocks' smaller
+    // Add a VisibilityBundle to avoid visibility-parent warnings; scale down to make blocks smaller
+    let house_root = commands.spawn((TransformBundle::from_transform(Transform::from_scale(Vec3::splat(0.25))), VisibilityBundle::default())).id();
+    commands.entity(house_root).with_children(|parent| {
+        // Platform
+        parent.spawn(PbrBundle {
             mesh: cube.clone(),
             material: mat_madera.clone(),
-            transform: Transform::from_xyz(0.0, h + 0.01, wall_length / 2.0 + 0.3 + i as f32 * depth).with_scale(Vec3::new(1.2, 0.12, depth)),
+            transform: Transform::from_xyz(0.0, 0.25, 0.0).with_scale(Vec3::new(6.0, 0.5, 6.0)),
             ..Default::default()
         });
-    }
+
+        // Walls
+        let wall_height = 2.0;
+        let wall_length = 5.0;
+        let back_wall_mesh = meshes.add(create_tiled_plane(wall_length, wall_height, wall_length * 8.0, wall_height * 8.0));
+        parent.spawn(PbrBundle {
+            mesh: back_wall_mesh.clone(),
+            material: mat_madera.clone(),
+            transform: Transform::from_translation(Vec3::new(0.0, wall_height / 2.0 + 0.5, -wall_length / 2.0))
+                .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
+            ..Default::default()
+        });
+
+        let front_wall_mesh = meshes.add(create_tiled_plane(wall_length, wall_height, wall_length * 8.0, wall_height * 8.0));
+        parent.spawn(PbrBundle {
+            mesh: front_wall_mesh.clone(),
+            material: mat_madera.clone(),
+            transform: Transform::from_translation(Vec3::new(0.0, wall_height / 2.0 + 0.5, wall_length / 2.0))
+                .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+            ..Default::default()
+        });
+
+        let side_wall_mesh = meshes.add(create_tiled_plane(wall_length, wall_height, wall_length * 8.0, wall_height * 8.0));
+        parent.spawn(PbrBundle {
+            mesh: side_wall_mesh.clone(),
+            material: mat_madera.clone(),
+            transform: Transform::from_translation(Vec3::new(-wall_length / 2.0, wall_height / 2.0 + 0.5, 0.0))
+                .with_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2)),
+            ..Default::default()
+        });
+        parent.spawn(PbrBundle {
+            mesh: side_wall_mesh.clone(),
+            material: mat_madera.clone(),
+            transform: Transform::from_translation(Vec3::new(wall_length / 2.0, wall_height / 2.0 + 0.5, 0.0))
+                .with_rotation(Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2)),
+            ..Default::default()
+        });
+
+        // Posts
+        let post_scale = Vec3::new(0.3, wall_height + 0.5, 0.3);
+        let corners = [
+            Vec3::new(-wall_length / 2.0, 0.0, -wall_length / 2.0),
+            Vec3::new(wall_length / 2.0, 0.0, -wall_length / 2.0),
+            Vec3::new(-wall_length / 2.0, 0.0, wall_length / 2.0),
+            Vec3::new(wall_length / 2.0, 0.0, wall_length / 2.0),
+        ];
+        for c in corners {
+            parent.spawn(PbrBundle {
+                mesh: cube.clone(),
+                material: mat_tronco.clone(),
+                transform: Transform::from_translation(Vec3::new(c.x, (wall_height + 0.5) / 2.0 + 0.5, c.z)).with_scale(post_scale),
+                ..Default::default()
+            });
+        }
+
+    // Roof halves
+    let roof_span = 3.5;
+    let roof_length = wall_length + 0.6;
+    let roof_tiles_u = roof_length * 8.0;
+    let roof_tiles_v = roof_span * 8.0;
+        let roof_plane = meshes.add(create_tiled_plane(roof_length, roof_span, roof_tiles_u, roof_tiles_v));
+        let angle = 0.9f32; // slope angle
+        // rotate around Z to create V-shaped roof halves
+        parent.spawn(PbrBundle {
+            mesh: roof_plane.clone(),
+            material: mat_tronco.clone(),
+            transform: Transform::from_translation(Vec3::new(0.0, wall_height + 0.6, -0.3))
+                .with_rotation(Quat::from_rotation_z(angle)),
+            ..Default::default()
+        });
+        parent.spawn(PbrBundle {
+            mesh: roof_plane.clone(),
+            material: mat_tronco.clone(),
+            transform: Transform::from_translation(Vec3::new(0.0, wall_height + 0.6, 0.3))
+                .with_rotation(Quat::from_rotation_z(-angle)),
+            ..Default::default()
+        });
+
+        // Stairs
+        for i in 0..4 {
+            let h = 0.12 + i as f32 * 0.12;
+            let depth = 0.6;
+            parent.spawn(PbrBundle {
+                mesh: cube.clone(),
+                material: mat_madera.clone(),
+                transform: Transform::from_xyz(0.0, h + 0.01, wall_length / 2.0 + 0.3 + i as f32 * depth).with_scale(Vec3::new(1.2, 0.12, depth)),
+                ..Default::default()
+            });
+        }
+    });
 
     // Directional light coming from the east (+X) angled downwards
     let mut light_transform = Transform::from_xyz(4.0, 8.0, 0.0);
@@ -344,6 +354,19 @@ fn orbit_camera_system(
         let y = orbit.distance * orbit.pitch.sin();
         let pos = Vec3::new(orbit.target.x + x, orbit.target.y + y, orbit.target.z + z);
         *t = Transform::from_translation(pos).looking_at(orbit.target, Vec3::Y);
+    }
+}
+
+fn grass_follow_system(
+    cams: Query<&Transform, (With<Camera3d>, Without<InfiniteGrass>)>,
+    mut grasses: Query<&mut Transform, (With<InfiniteGrass>, Without<Camera3d>)>,
+) {
+    if let Ok(cam_t) = cams.get_single() {
+        let cam_pos = cam_t.translation;
+        for mut g in grasses.iter_mut() {
+            g.translation.x = (cam_pos.x / 1.0).round() * 1.0; // snap to 1.0 to reduce jitter
+            g.translation.z = (cam_pos.z / 1.0).round() * 1.0;
+        }
     }
 }
 
