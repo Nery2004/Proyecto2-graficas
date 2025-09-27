@@ -1,16 +1,12 @@
 use bevy::prelude::*;
 use bevy::input::mouse::{MouseMotion, MouseWheel};
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-use bevy::render::texture::Image as BevyImage;
-use image::{RgbaImage, Rgba};
-use std::fs::create_dir_all;
 
 fn main() {
     App::new()
     .add_plugins(DefaultPlugins)
     .add_systems(Startup, setup)
     .add_systems(Update, orbit_camera_system)
-    .add_systems(Update, grass_follow_system)
         .run();
 }
 
@@ -23,108 +19,18 @@ struct OrbitCamera {
     pub rotating: bool,
 }
 
-#[derive(Component)]
-struct InfiniteGrass;
-
 // (removed unused helper make_image; we generate/supply high-res images via make_and_save)
 
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut images: ResMut<Assets<BevyImage>>,
+    asset_server: Res<AssetServer>,
 ) {
-    // Higher-quality textures: 1024x1024 with procedural detail
-    let size = 1024u32;
-
-    // Ensure assets dir exists so saved PNGs are available for inspection
-    let _ = create_dir_all("assets");
-
-    // Helper to create both a Bevy image and save a PNG to assets
-    fn make_and_save<F>(name: &str, width: u32, height: u32, mut f: F) -> (BevyImage, String)
-    where
-        F: FnMut(u32, u32) -> [u8; 4],
-    {
-        // build RgbaImage for saving
-        let mut img = RgbaImage::new(width, height);
-        let mut data = Vec::with_capacity((width * height * 4) as usize);
-        for y in 0..height {
-            for x in 0..width {
-                let px = f(x, y);
-                img.put_pixel(x, y, Rgba(px));
-                data.push(px[0]);
-                data.push(px[1]);
-                data.push(px[2]);
-                data.push(px[3]);
-            }
-        }
-        // save PNG
-        let path = format!("assets/{}", name);
-        let _ = img.save(&path);
-        // create Bevy image
-        let bevy_img = BevyImage::new(
-            Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            TextureDimension::D2,
-            data,
-            TextureFormat::Rgba8UnormSrgb,
-        );
-        (bevy_img, path)
-    }
-
-    // grass: layered noise + subtle blades
-    let (grass, _grass_path) = make_and_save("high_grass.png", size, size, |x, y| {
-        let fx = x as f32 / size as f32;
-        let fy = y as f32 / size as f32;
-        // layered hash noise
-        let n1 = ((x.wrapping_mul(73856093) ^ y.wrapping_mul(19349663)) & 255) as u8;
-        let n2 = (((x / 4).wrapping_mul(73856093) ^ (y / 4).wrapping_mul(19349663)) & 255) as u8;
-        let variation = ((n1 as u16 + (n2 as u16 / 2)) / 2) as u8;
-        // blade pattern
-        let blade = ((fx * 40.0).sin() * (fy * 60.0).cos() * 0.5 + 0.5) * 40.0;
-        let base_g = 120u8.saturating_add((variation as f32 * 0.7) as u8);
-        let g = (base_g as f32 + blade) as u8;
-        [30u8, g, 18u8, 255u8]
-    });
-
-    // tronco: vertical grain with sine perturbation and noise
-    let (tronco, _tronco_path) = make_and_save("high_tronco.png", size, size, |x, y| {
-        let fx = x as f32 / 16.0;
-        let grain = (fx + (y as f32 / 128.0).sin() * 2.0).sin();
-        let base = 90.0 + grain * 40.0;
-        let noise = ((x.wrapping_mul(73856093) ^ y.wrapping_mul(19349663)) & 127) as f32 / 127.0 * 20.0;
-        let r = (base + noise) as u8;
-        let g = (base * 0.7 + noise * 0.6) as u8;
-        let b = (base * 0.4) as u8;
-        [r, g, b, 255u8]
-    });
-
-    // madera: horizontal grain with occasional knots
-    let (madera, _madera_path) = make_and_save("high_madera.png", size, size, |x, y| {
-        let fy = y as f32 / 12.0;
-        let grain = (fy + (x as f32 / 200.0).sin() * 1.5).sin();
-        let base = 150.0 + grain * 40.0;
-        // knots
-        let cx = (size as f32 * 0.45) as i32;
-        let cy = (size as f32 * 0.5) as i32;
-        let dx = x as i32 - cx;
-        let dy = y as i32 - cy;
-        let dist = ((dx * dx + dy * dy) as f32).sqrt();
-        let knot = if dist < (size as f32 * 0.08) { (1.0 - dist / (size as f32 * 0.08)) * -60.0 } else { 0.0 };
-        let noise = ((x.wrapping_mul(73856093) ^ y.wrapping_mul(19349663)) & 127) as f32 / 127.0 * 12.0;
-        let r = (base + knot + noise) as u8;
-        let g = (base * 0.8 + knot * 0.6 + noise * 0.6) as u8;
-        let b = (base * 0.5) as u8;
-        [r, g, b, 255u8]
-    });
-
-    // Add images to asset storage and create material handles
-    let grass_handle = images.add(grass);
-    let tronco_handle = images.add(tronco);
-    let madera_handle = images.add(madera);
+    // Load the provided PNGs from assets
+    let grass_handle = asset_server.load("grass.png");
+    let tronco_handle = asset_server.load("tronco.png");
+    let madera_handle = asset_server.load("madera.png");
 
     let mat_grass = materials.add(StandardMaterial {
         base_color_texture: Some(grass_handle.clone()),
@@ -173,123 +79,72 @@ fn setup(
         mesh
     }
 
-    // Create a tiled ground plane (will be moved to follow camera)
+    // Create a tiled ground plane
     let ground_size = 200.0f32;
     let ground_tiles = 128.0f32; // increase repeats for better detail
     let ground_mesh = meshes.add(create_tiled_plane(ground_size, ground_size, ground_tiles, ground_tiles));
 
-    // Floor (infinite-looking) - use tiled plane and add marker to follow camera
-    #[derive(Component)]
-    struct InfiniteGrass;
-
-    commands.spawn((PbrBundle {
+    // Floor - large tiled plane using the provided grass texture
+    commands.spawn(PbrBundle {
         mesh: ground_mesh.clone(),
         material: mat_grass.clone(),
         transform: Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
         ..Default::default()
-    }, InfiniteGrass));
-
-    // Create a parent entity for the house and scale it down to make 'blocks' smaller
-    // Add a VisibilityBundle to avoid visibility-parent warnings; scale down to make blocks smaller
-    let house_root = commands.spawn((TransformBundle::from_transform(Transform::from_scale(Vec3::splat(0.25))), VisibilityBundle::default())).id();
-    commands.entity(house_root).with_children(|parent| {
-        // Platform
-        parent.spawn(PbrBundle {
-            mesh: cube.clone(),
-            material: mat_madera.clone(),
-            transform: Transform::from_xyz(0.0, 0.25, 0.0).with_scale(Vec3::new(6.0, 0.5, 6.0)),
-            ..Default::default()
-        });
-
-        // Walls
-        let wall_height = 2.0;
-        let wall_length = 5.0;
-        let back_wall_mesh = meshes.add(create_tiled_plane(wall_length, wall_height, wall_length * 8.0, wall_height * 8.0));
-        parent.spawn(PbrBundle {
-            mesh: back_wall_mesh.clone(),
-            material: mat_madera.clone(),
-            transform: Transform::from_translation(Vec3::new(0.0, wall_height / 2.0 + 0.5, -wall_length / 2.0))
-                .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
-            ..Default::default()
-        });
-
-        let front_wall_mesh = meshes.add(create_tiled_plane(wall_length, wall_height, wall_length * 8.0, wall_height * 8.0));
-        parent.spawn(PbrBundle {
-            mesh: front_wall_mesh.clone(),
-            material: mat_madera.clone(),
-            transform: Transform::from_translation(Vec3::new(0.0, wall_height / 2.0 + 0.5, wall_length / 2.0))
-                .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
-            ..Default::default()
-        });
-
-        let side_wall_mesh = meshes.add(create_tiled_plane(wall_length, wall_height, wall_length * 8.0, wall_height * 8.0));
-        parent.spawn(PbrBundle {
-            mesh: side_wall_mesh.clone(),
-            material: mat_madera.clone(),
-            transform: Transform::from_translation(Vec3::new(-wall_length / 2.0, wall_height / 2.0 + 0.5, 0.0))
-                .with_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2)),
-            ..Default::default()
-        });
-        parent.spawn(PbrBundle {
-            mesh: side_wall_mesh.clone(),
-            material: mat_madera.clone(),
-            transform: Transform::from_translation(Vec3::new(wall_length / 2.0, wall_height / 2.0 + 0.5, 0.0))
-                .with_rotation(Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2)),
-            ..Default::default()
-        });
-
-        // Posts
-        let post_scale = Vec3::new(0.3, wall_height + 0.5, 0.3);
-        let corners = [
-            Vec3::new(-wall_length / 2.0, 0.0, -wall_length / 2.0),
-            Vec3::new(wall_length / 2.0, 0.0, -wall_length / 2.0),
-            Vec3::new(-wall_length / 2.0, 0.0, wall_length / 2.0),
-            Vec3::new(wall_length / 2.0, 0.0, wall_length / 2.0),
-        ];
-        for c in corners {
-            parent.spawn(PbrBundle {
-                mesh: cube.clone(),
-                material: mat_tronco.clone(),
-                transform: Transform::from_translation(Vec3::new(c.x, (wall_height + 0.5) / 2.0 + 0.5, c.z)).with_scale(post_scale),
-                ..Default::default()
-            });
-        }
-
-    // Roof halves
-    let roof_span = 3.5;
-    let roof_length = wall_length + 0.6;
-    let roof_tiles_u = roof_length * 8.0;
-    let roof_tiles_v = roof_span * 8.0;
-        let roof_plane = meshes.add(create_tiled_plane(roof_length, roof_span, roof_tiles_u, roof_tiles_v));
-        let angle = 0.9f32; // slope angle
-        // rotate around Z to create V-shaped roof halves
-        parent.spawn(PbrBundle {
-            mesh: roof_plane.clone(),
-            material: mat_tronco.clone(),
-            transform: Transform::from_translation(Vec3::new(0.0, wall_height + 0.6, -0.3))
-                .with_rotation(Quat::from_rotation_z(angle)),
-            ..Default::default()
-        });
-        parent.spawn(PbrBundle {
-            mesh: roof_plane.clone(),
-            material: mat_tronco.clone(),
-            transform: Transform::from_translation(Vec3::new(0.0, wall_height + 0.6, 0.3))
-                .with_rotation(Quat::from_rotation_z(-angle)),
-            ..Default::default()
-        });
-
-        // Stairs
-        for i in 0..4 {
-            let h = 0.12 + i as f32 * 0.12;
-            let depth = 0.6;
-            parent.spawn(PbrBundle {
-                mesh: cube.clone(),
-                material: mat_madera.clone(),
-                transform: Transform::from_xyz(0.0, h + 0.01, wall_length / 2.0 + 0.3 + i as f32 * depth).with_scale(Vec3::new(1.2, 0.12, depth)),
-                ..Default::default()
-            });
-        }
     });
+
+    // Read individual layer files (layer_0.txt .. layer_4.txt) and spawn cubes stacked on Y
+    let layer_files = [
+        "assets/layer_0.txt",
+        "assets/layer_1.txt",
+        "assets/layer_2.txt",
+        "assets/layer_3.txt",
+        "assets/layer_4.txt",
+    ];
+
+    for (layer_idx, path) in layer_files.iter().enumerate() {
+        let text = std::fs::read_to_string(path).unwrap_or_else(|_| {
+            warn!("Could not read {}, skipping", path);
+            String::new()
+        });
+
+        if text.trim().is_empty() {
+            continue;
+        }
+
+        let rows: Vec<&str> = text.lines().collect();
+        let rows_count = rows.len();
+        if rows_count == 0 {
+            continue;
+        }
+
+        // assume all rows have the same width
+        let cols = rows[0].chars().count();
+        let cols_f = cols as f32;
+        let rows_f = rows_count as f32;
+
+        for (row_idx, row) in rows.iter().enumerate() {
+            for (col_idx, ch) in row.chars().enumerate() {
+                // center blocks so the house is centered at origin
+                let x = col_idx as f32 - (cols_f - 1.0) / 2.0;
+                let z = - (row_idx as f32 - (rows_f - 1.0) / 2.0);
+                let y = layer_idx as f32; // stack by file index
+                let pos = Vec3::new(x, y, z);
+
+                let bundle = match ch {
+                    'g' | 'G' => Some(PbrBundle { mesh: cube.clone(), material: mat_grass.clone(), transform: Transform::from_translation(pos), ..Default::default() }),
+                    't' | 'T' => Some(PbrBundle { mesh: cube.clone(), material: mat_tronco.clone(), transform: Transform::from_translation(pos), ..Default::default() }),
+                    'm' | 'M' => Some(PbrBundle { mesh: cube.clone(), material: mat_madera.clone(), transform: Transform::from_translation(pos), ..Default::default() }),
+                    'r' | 'R' => Some(PbrBundle { mesh: cube.clone(), material: mat_tronco.clone(), transform: Transform::from_translation(pos), ..Default::default() }),
+                    '.' | ' ' => None,
+                    _ => None,
+                };
+
+                if let Some(b) = bundle {
+                    commands.spawn(b);
+                }
+            }
+        }
+    }
 
     // Directional light coming from the east (+X) angled downwards
     let mut light_transform = Transform::from_xyz(4.0, 8.0, 0.0);
@@ -314,7 +169,8 @@ fn setup(
     commands.insert_resource(OrbitCamera {
         yaw: -45f32.to_radians(),
         pitch: -25f32.to_radians(),
-        distance: 6.0,
+        // start farther back so we can see the whole house
+        distance: 20.0,
         target: Vec3::new(0.0, 0.5, 0.0),
         rotating: false,
     });
@@ -324,6 +180,7 @@ fn orbit_camera_system(
     mut mouse_motion_events: EventReader<MouseMotion>,
     mut mouse_wheel_events: EventReader<MouseWheel>,
     buttons: Res<Input<MouseButton>>,
+    keys: Res<Input<KeyCode>>,
     mut cams: Query<&mut Transform, With<Camera3d>>,
     mut orbit: ResMut<OrbitCamera>,
 ) {
@@ -341,11 +198,22 @@ fn orbit_camera_system(
         }
     }
 
-    // zoom with wheel
+    // zoom with wheel (smooth exponential scaling)
     for ev in mouse_wheel_events.iter() {
-        orbit.distance *= 1.0 - ev.y * 0.1;
-        orbit.distance = orbit.distance.clamp(1.0, 100.0);
+        // smaller factor for finer control
+        orbit.distance *= (1.0 - ev.y * 0.06).clamp(0.5, 1.5);
     }
+
+    // keyboard zoom: PageUp to zoom out, PageDown to zoom in
+    if keys.pressed(KeyCode::PageUp) {
+        orbit.distance += 0.5;
+    }
+    if keys.pressed(KeyCode::PageDown) {
+        orbit.distance -= 0.5;
+    }
+
+    // clamp the distance to a larger maximum so user can zoom way out
+    orbit.distance = orbit.distance.clamp(1.0, 500.0);
 
     // update camera transform(s)
     for mut t in cams.iter_mut() {
@@ -358,15 +226,5 @@ fn orbit_camera_system(
 }
 
 fn grass_follow_system(
-    cams: Query<&Transform, (With<Camera3d>, Without<InfiniteGrass>)>,
-    mut grasses: Query<&mut Transform, (With<InfiniteGrass>, Without<Camera3d>)>,
-) {
-    if let Ok(cam_t) = cams.get_single() {
-        let cam_pos = cam_t.translation;
-        for mut g in grasses.iter_mut() {
-            g.translation.x = (cam_pos.x / 1.0).round() * 1.0; // snap to 1.0 to reduce jitter
-            g.translation.z = (cam_pos.z / 1.0).round() * 1.0;
-        }
-    }
-}
+) { }
 
