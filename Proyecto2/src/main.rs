@@ -99,6 +99,8 @@ fn setup(
         "assets/layer_2.txt",
         "assets/layer_3.txt",
         "assets/layer_4.txt",
+        "assets/layer_5.txt",
+        "assets/layer_6.txt",
     ];
 
     for (layer_idx, path) in layer_files.iter().enumerate() {
