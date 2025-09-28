@@ -46,20 +46,7 @@ Consejos:
   `m` (madera), `w` (vidrio), `a` (agua), `f` (farol), etc. Revisa `Proyecto2/src/main.rs` para
   la tabla actual de mapeo.
 
-## Añadir un enlace de YouTube
+## Enlace Video:
 
-Si quieres enlazar (o mostrar) un vídeo de YouTube en este README, pega la URL en el lugar
-que prefieras. Ejemplos:
-
-- Enlace directo:
-
-  https://youtu.be/VIDEO_ID
-
-- Enlace en Markdown:
-
-  [Ver demo en YouTube](https://youtu.be/VIDEO_ID)
-
-- Mini-preview (sustituye `VIDEO_ID` por el id real):
-
-  [![Demo](https://img.youtube.com/vi/VIDEO_ID/0.jpg)](https://youtu.be/VIDEO_ID)
+  https://youtu.be/oZTX7kd2n38
 
