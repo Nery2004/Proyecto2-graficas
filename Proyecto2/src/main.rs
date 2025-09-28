@@ -52,6 +52,13 @@ fn setup(
         perceptual_roughness: 0.8,
         ..Default::default()
     });
+    // emissive material for lantern body
+    let mat_lantern = materials.add(StandardMaterial {
+        base_color: Color::rgb(1.0, 0.85, 0.6),
+        emissive: Color::rgb(1.0, 0.6, 0.2),
+        perceptual_roughness: 0.3,
+        ..Default::default()
+    });
     let mat_leaves = materials.add(StandardMaterial {
         base_color_texture: Some(leaves_handle.clone()),
         perceptual_roughness: 0.7,
@@ -157,21 +164,57 @@ fn setup(
                 let y = layer_idx as f32; // stack by file index
                 let pos = Vec3::new(x, y, z);
 
-                let bundle = match ch {
-                    'g' | 'G' => Some(PbrBundle { mesh: cube.clone(), material: mat_grass.clone(), transform: Transform::from_translation(pos), ..Default::default() }),
-                    't' | 'T' => Some(PbrBundle { mesh: cube.clone(), material: mat_tronco.clone(), transform: Transform::from_translation(pos), ..Default::default() }),
-                    'm' | 'M' => Some(PbrBundle { mesh: cube.clone(), material: mat_madera.clone(), transform: Transform::from_translation(pos), ..Default::default() }),
-                    'r' | 'R' => Some(PbrBundle { mesh: cube.clone(), material: mat_tronco.clone(), transform: Transform::from_translation(pos), ..Default::default() }),
-                    'l' | 'L' => Some(PbrBundle { mesh: cube.clone(), material: mat_leaves.clone(), transform: Transform::from_translation(pos), ..Default::default() }),
-                    'a' | 'A' => Some(PbrBundle { mesh: cube.clone(), material: mat_agua.clone(), transform: Transform::from_translation(pos), ..Default::default() }),
-                    'f' | 'F' => Some(PbrBundle { mesh: cube.clone(), material: mat_farol.clone(), transform: Transform::from_translation(pos), ..Default::default() }),
-                    'd' | 'D' => Some(PbrBundle { mesh: cube.clone(), material: mat_tierra.clone(), transform: Transform::from_translation(pos), ..Default::default() }),
-                    '.' | ' ' => None,
-                    _ => None,
-                };
+                match ch {
+                    'g' | 'G' => {
+                        commands.spawn(PbrBundle { mesh: cube.clone(), material: mat_grass.clone(), transform: Transform::from_translation(pos), ..Default::default() });
+                    }
+                    't' | 'T' => {
+                        commands.spawn(PbrBundle { mesh: cube.clone(), material: mat_tronco.clone(), transform: Transform::from_translation(pos), ..Default::default() });
+                    }
+                    'm' | 'M' => {
+                        commands.spawn(PbrBundle { mesh: cube.clone(), material: mat_madera.clone(), transform: Transform::from_translation(pos), ..Default::default() });
+                    }
+                    'r' | 'R' => {
+                        commands.spawn(PbrBundle { mesh: cube.clone(), material: mat_tronco.clone(), transform: Transform::from_translation(pos), ..Default::default() });
+                    }
+                    'l' | 'L' => {
+                        // leaves (original behavior)
+                        commands.spawn(PbrBundle { mesh: cube.clone(), material: mat_leaves.clone(), transform: Transform::from_translation(pos), ..Default::default() });
+                    }
+                    'f' | 'F' => {
+                        // spawn a lantern composed entity: pole + lantern body (emissive) + point light
+                        commands.spawn(SpatialBundle { transform: Transform::from_translation(pos), ..Default::default() })
+                            .with_children(|parent| {
+                                // lantern body (emissive cube)
+                                parent.spawn(PbrBundle {
+                                    mesh: cube.clone(),
+                                    material: mat_lantern.clone(),
+                                    transform: Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)).with_scale(Vec3::splat(0.5)),
+                                    ..Default::default()
+                                });
 
-                if let Some(b) = bundle {
-                    commands.spawn(b);
+                                // point light slightly above the cube center
+                                parent.spawn(PointLightBundle {
+                                    transform: Transform::from_translation(Vec3::new(0.0, 0.15, 0.0)),
+                                    point_light: PointLight {
+                                        intensity: 1200.0,
+                                        range: 8.0,
+                                        color: Color::rgb(1.0, 0.85, 0.6),
+                                        shadows_enabled: true,
+                                        ..Default::default()
+                                    },
+                                    ..Default::default()
+                                });
+                            });
+                    }
+                    'a' | 'A' => {
+                        commands.spawn(PbrBundle { mesh: cube.clone(), material: mat_agua.clone(), transform: Transform::from_translation(pos), ..Default::default() });
+                    }
+                    'd' | 'D' => {
+                        commands.spawn(PbrBundle { mesh: cube.clone(), material: mat_tierra.clone(), transform: Transform::from_translation(pos), ..Default::default() });
+                    }
+                    '.' | ' ' => { /* empty */ }
+                    _ => { /* unknown char */ }
                 }
             }
         }
