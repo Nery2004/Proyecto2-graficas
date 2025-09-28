@@ -1,6 +1,11 @@
 use bevy::prelude::*;
 use bevy::input::mouse::{MouseMotion, MouseWheel};
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+use bevy::pbr::AlphaMode;
+use bevy::ecs::component::Component;
+
+#[derive(Component)]
+struct BaseLightIntensity(f32);
 
 fn main() {
     App::new()
@@ -73,7 +78,18 @@ fn setup(
     });
     let mat_agua = materials.add(StandardMaterial {
         base_color_texture: Some(agua_handle.clone()),
-        perceptual_roughness: 0.6,
+        // make water glossy/reflective so it shows specular highlights from lamps
+        perceptual_roughness: 0.06,
+        reflectance: 0.6,
+        metallic: 0.05,
+        ..Default::default()
+    });
+    // transparent glass material (use 'w' in layers for windows)
+    let mat_glass = materials.add(StandardMaterial {
+        base_color: Color::rgba(0.8, 0.9, 1.0, 0.28),
+        perceptual_roughness: 0.05,
+        reflectance: 0.0,
+        alpha_mode: AlphaMode::Blend,
         ..Default::default()
     });
         let mat_tierra = materials.add(StandardMaterial {
@@ -203,7 +219,7 @@ fn setup(
                                 });
 
                                 // point light slightly above the cube center
-                                parent.spawn(PointLightBundle {
+                                parent.spawn((PointLightBundle {
                                     transform: Transform::from_translation(Vec3::new(0.0, 0.15, 0.0)),
                                     point_light: PointLight {
                                         intensity: 1200.0,
@@ -213,11 +229,15 @@ fn setup(
                                         ..Default::default()
                                     },
                                     ..Default::default()
-                                });
+                                }, BaseLightIntensity(1200.0)));
                             });
                     }
                     'a' | 'A' => {
                         commands.spawn(PbrBundle { mesh: cube.clone(), material: mat_agua.clone(), transform: Transform::from_translation(pos), ..Default::default() });
+                    }
+                    'w' | 'W' => {
+                        // glass / window - transparent
+                        commands.spawn(PbrBundle { mesh: cube.clone(), material: mat_glass.clone(), transform: Transform::from_translation(pos), ..Default::default() });
                     }
                     'd' | 'D' => {
                         commands.spawn(PbrBundle { mesh: cube.clone(), material: mat_tierra.clone(), transform: Transform::from_translation(pos), ..Default::default() });
@@ -321,6 +341,7 @@ fn update_lighting_system(
     night: Res<NightMode>,
     mut dir_query: Query<&mut DirectionalLight>,
     mut clear_color: ResMut<ClearColor>,
+    mut point_lights: Query<(&mut PointLight, &BaseLightIntensity)>,
 ) {
     if night.is_changed() {
         if **night {
@@ -329,11 +350,20 @@ fn update_lighting_system(
             for mut dl in &mut dir_query {
                 dl.illuminance = 800.0;
             }
+            // boost lantern point lights
+            for (mut pl, base) in &mut point_lights {
+                pl.intensity = base.0 * 1.6; // 60% brighter at night
+                pl.range = (pl.range).max(8.0);
+            }
         } else {
             // day
             clear_color.0 = Color::rgb(0.5, 0.7, 1.0);
             for mut dl in &mut dir_query {
                 dl.illuminance = 10000.0;
+            }
+            // restore lantern intensities
+            for (mut pl, base) in &mut point_lights {
+                pl.intensity = base.0;
             }
         }
     }
@@ -351,13 +381,23 @@ fn orbit_camera_system(
     let rotating = buttons.pressed(MouseButton::Left);
     orbit.rotating = rotating;
 
-    // apply mouse motion to yaw/pitch
+    // apply mouse motion to yaw/pitch or panning depending on mouse button
     for ev in mouse_motion_events.iter() {
         if orbit.rotating {
             let sens = 0.005;
             orbit.yaw -= ev.delta.x * sens;
             orbit.pitch -= ev.delta.y * sens;
             orbit.pitch = orbit.pitch.clamp(-1.5, 1.4);
+        } else if buttons.pressed(MouseButton::Right) {
+            // pan the camera target horizontally in XZ plane using right-drag
+            // compute right and forward vectors on XZ plane from yaw
+            let pan_sens = 0.002 * orbit.distance.max(1.0);
+            let right_dir = Vec3::new(-orbit.yaw.sin(), 0.0, orbit.yaw.cos());
+            let forward_dir = Vec3::new(orbit.yaw.cos(), 0.0, orbit.yaw.sin());
+            // move target opposite to mouse X (dragging right moves view right)
+            orbit.target -= right_dir * ev.delta.x * pan_sens;
+            // move target along forward for vertical mouse movement (dragging up moves forward)
+            orbit.target += forward_dir * ev.delta.y * pan_sens;
         }
     }
 
