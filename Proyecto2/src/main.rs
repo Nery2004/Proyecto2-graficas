@@ -32,6 +32,9 @@ fn setup(
     let tronco_handle = asset_server.load("tronco.png");
     let madera_handle = asset_server.load("madera.png");
     let leaves_handle = asset_server.load("leaves.png");
+    let farol_handle = asset_server.load("farol.png");
+    let agua_handle = asset_server.load("agua.png");
+    let tierra_handle = asset_server.load("tierra.png");
     let mat_grass = materials.add(StandardMaterial {
         base_color_texture: Some(grass_handle.clone()),
         perceptual_roughness: 1.0,
@@ -52,6 +55,21 @@ fn setup(
     let mat_leaves = materials.add(StandardMaterial {
         base_color_texture: Some(leaves_handle.clone()),
         perceptual_roughness: 0.7,
+        ..Default::default()
+    });
+    let mat_agua = materials.add(StandardMaterial {
+        base_color_texture: Some(agua_handle.clone()),
+        perceptual_roughness: 0.6,
+        ..Default::default()
+    });
+    let mat_farol = materials.add(StandardMaterial {
+        base_color_texture: Some(farol_handle.clone()),
+        perceptual_roughness: 0.5,
+        ..Default::default()
+    });
+        let mat_tierra = materials.add(StandardMaterial {
+        base_color_texture: Some(tierra_handle.clone()),
+        perceptual_roughness: 0.4,
         ..Default::default()
     });
 
@@ -145,6 +163,9 @@ fn setup(
                     'm' | 'M' => Some(PbrBundle { mesh: cube.clone(), material: mat_madera.clone(), transform: Transform::from_translation(pos), ..Default::default() }),
                     'r' | 'R' => Some(PbrBundle { mesh: cube.clone(), material: mat_tronco.clone(), transform: Transform::from_translation(pos), ..Default::default() }),
                     'l' | 'L' => Some(PbrBundle { mesh: cube.clone(), material: mat_leaves.clone(), transform: Transform::from_translation(pos), ..Default::default() }),
+                    'a' | 'A' => Some(PbrBundle { mesh: cube.clone(), material: mat_agua.clone(), transform: Transform::from_translation(pos), ..Default::default() }),
+                    'f' | 'F' => Some(PbrBundle { mesh: cube.clone(), material: mat_farol.clone(), transform: Transform::from_translation(pos), ..Default::default() }),
+                    'd' | 'D' => Some(PbrBundle { mesh: cube.clone(), material: mat_tierra.clone(), transform: Transform::from_translation(pos), ..Default::default() }),
                     '.' | ' ' => None,
                     _ => None,
                 };
