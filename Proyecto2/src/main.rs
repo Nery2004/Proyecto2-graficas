@@ -31,7 +31,7 @@ fn setup(
     let grass_handle = asset_server.load("grass.png");
     let tronco_handle = asset_server.load("tronco.png");
     let madera_handle = asset_server.load("madera.png");
-
+    let leaves_handle = asset_server.load("leaves.png");
     let mat_grass = materials.add(StandardMaterial {
         base_color_texture: Some(grass_handle.clone()),
         perceptual_roughness: 1.0,
@@ -47,6 +47,11 @@ fn setup(
     let mat_madera = materials.add(StandardMaterial {
         base_color_texture: Some(madera_handle.clone()),
         perceptual_roughness: 0.8,
+        ..Default::default()
+    });
+    let mat_leaves = materials.add(StandardMaterial {
+        base_color_texture: Some(leaves_handle.clone()),
+        perceptual_roughness: 0.7,
         ..Default::default()
     });
 
@@ -101,6 +106,8 @@ fn setup(
         "assets/layer_4.txt",
         "assets/layer_5.txt",
         "assets/layer_6.txt",
+        "assets/layer_7.txt",
+        "assets/layer_8.txt",
     ];
 
     for (layer_idx, path) in layer_files.iter().enumerate() {
@@ -137,6 +144,7 @@ fn setup(
                     't' | 'T' => Some(PbrBundle { mesh: cube.clone(), material: mat_tronco.clone(), transform: Transform::from_translation(pos), ..Default::default() }),
                     'm' | 'M' => Some(PbrBundle { mesh: cube.clone(), material: mat_madera.clone(), transform: Transform::from_translation(pos), ..Default::default() }),
                     'r' | 'R' => Some(PbrBundle { mesh: cube.clone(), material: mat_tronco.clone(), transform: Transform::from_translation(pos), ..Default::default() }),
+                    'l' | 'L' => Some(PbrBundle { mesh: cube.clone(), material: mat_leaves.clone(), transform: Transform::from_translation(pos), ..Default::default() }),
                     '.' | ' ' => None,
                     _ => None,
                 };
