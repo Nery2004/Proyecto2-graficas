@@ -32,7 +32,6 @@ fn setup(
     let tronco_handle = asset_server.load("tronco.png");
     let madera_handle = asset_server.load("madera.png");
     let leaves_handle = asset_server.load("leaves.png");
-    let farol_handle = asset_server.load("farol.png");
     let agua_handle = asset_server.load("agua.png");
     let tierra_handle = asset_server.load("tierra.png");
     let mat_grass = materials.add(StandardMaterial {
