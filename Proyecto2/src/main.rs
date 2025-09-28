@@ -6,9 +6,16 @@ fn main() {
     App::new()
     .add_plugins(DefaultPlugins)
     .add_systems(Startup, setup)
-    .add_systems(Update, orbit_camera_system)
+    .add_systems(Update, (
+        orbit_camera_system,
+        button_system,
+        update_lighting_system,
+    ))
         .run();
 }
+
+#[derive(Resource, Deref, DerefMut)]
+struct NightMode(bool);
 
 #[derive(Resource)]
 struct OrbitCamera {
@@ -34,6 +41,7 @@ fn setup(
     let leaves_handle = asset_server.load("leaves.png");
     let agua_handle = asset_server.load("agua.png");
     let tierra_handle = asset_server.load("tierra.png");
+    let vidrio_handle = asset_server.load("vidrio.png");
     let mat_grass = materials.add(StandardMaterial {
         base_color_texture: Some(grass_handle.clone()),
         perceptual_roughness: 1.0,
@@ -68,16 +76,17 @@ fn setup(
         perceptual_roughness: 0.6,
         ..Default::default()
     });
-    let mat_farol = materials.add(StandardMaterial {
-        base_color_texture: Some(farol_handle.clone()),
-        perceptual_roughness: 0.5,
-        ..Default::default()
-    });
         let mat_tierra = materials.add(StandardMaterial {
         base_color_texture: Some(tierra_handle.clone()),
         perceptual_roughness: 0.4,
         ..Default::default()
     });
+    let mat_vidrio = materials.add(StandardMaterial {
+        base_color_texture: Some(vidrio_handle.clone()),
+        perceptual_roughness: 0.4,
+        ..Default::default()
+    });
+
 
     // Shared meshes to reduce GPU uploads
     let cube = meshes.add(Mesh::from(shape::Cube { size: 1.0 }));
@@ -132,6 +141,7 @@ fn setup(
         "assets/layer_6.txt",
         "assets/layer_7.txt",
         "assets/layer_8.txt",
+        "assets/layer_9.txt",
     ];
 
     for (layer_idx, path) in layer_files.iter().enumerate() {
@@ -212,6 +222,9 @@ fn setup(
                     'd' | 'D' => {
                         commands.spawn(PbrBundle { mesh: cube.clone(), material: mat_tierra.clone(), transform: Transform::from_translation(pos), ..Default::default() });
                     }
+                    'v' | 'V' => {
+                        commands.spawn(PbrBundle { mesh: cube.clone(), material: mat_vidrio.clone(), transform: Transform::from_translation(pos), ..Default::default() });
+                    }
                     '.' | ' ' => { /* empty */ }
                     _ => { /* unknown char */ }
                 }
@@ -222,7 +235,8 @@ fn setup(
     // Directional light coming from the east (+X) angled downwards
     let mut light_transform = Transform::from_xyz(4.0, 8.0, 0.0);
     light_transform.look_at(Vec3::ZERO, Vec3::Y);
-    commands.spawn(DirectionalLightBundle {
+    // spawn directional light and tag it so we can toggle
+    commands.spawn((DirectionalLightBundle {
         directional_light: DirectionalLight {
             illuminance: 10000.0,
             shadows_enabled: true,
@@ -230,7 +244,7 @@ fn setup(
         },
         transform: light_transform,
         ..Default::default()
-    });
+    }, Name::new("MainDirectionalLight")));
 
     // Camera
     commands.spawn(Camera3dBundle {
@@ -247,6 +261,82 @@ fn setup(
         target: Vec3::new(0.0, 0.5, 0.0),
         rotating: false,
     });
+
+    // UI: top-right button to toggle night/day (absolute positioned)
+    commands.spawn(NodeBundle {
+        style: Style {
+            position_type: PositionType::Absolute,
+            top: Val::Px(8.0),
+            right: Val::Px(8.0),
+            ..Default::default()
+        },
+        background_color: BackgroundColor(Color::NONE),
+        ..Default::default()
+    }).with_children(|parent| {
+        parent.spawn(ButtonBundle {
+            style: Style {
+                padding: UiRect::all(Val::Px(8.0)),
+                margin: UiRect::all(Val::Px(4.0)),
+                ..Default::default()
+            },
+            background_color: BackgroundColor(Color::rgb(0.15, 0.15, 0.2)),
+            ..Default::default()
+        }).with_children(|b| {
+            b.spawn(TextBundle::from_section("Toggle Night", TextStyle {
+                font_size: 16.0,
+                color: Color::WHITE,
+                ..Default::default()
+            }));
+        });
+    });
+
+    // start in day mode
+    commands.insert_resource(NightMode(false));
+}
+
+// System: handle button interaction
+fn button_system(
+    mut interaction_query: Query<(&Interaction, &mut BackgroundColor), (Changed<Interaction>, With<Button>)>,
+    mut night: ResMut<NightMode>,
+) {
+    for (interaction, mut bg) in &mut interaction_query {
+        match *interaction {
+            Interaction::Pressed => {
+                // toggle night mode
+                **night = !**night;
+                *bg = BackgroundColor(Color::rgb(0.2, 0.2, 0.25));
+            }
+            Interaction::Hovered => {
+                *bg = BackgroundColor(Color::rgb(0.2, 0.2, 0.3));
+            }
+            Interaction::None => {
+                *bg = BackgroundColor(Color::rgb(0.15, 0.15, 0.2));
+            }
+        }
+    }
+}
+
+// System: update lighting and background color based on NightMode
+fn update_lighting_system(
+    night: Res<NightMode>,
+    mut dir_query: Query<&mut DirectionalLight>,
+    mut clear_color: ResMut<ClearColor>,
+) {
+    if night.is_changed() {
+        if **night {
+            // night: dark sky, dim directional light
+            clear_color.0 = Color::rgb(0.02, 0.03, 0.06);
+            for mut dl in &mut dir_query {
+                dl.illuminance = 800.0;
+            }
+        } else {
+            // day
+            clear_color.0 = Color::rgb(0.5, 0.7, 1.0);
+            for mut dl in &mut dir_query {
+                dl.illuminance = 10000.0;
+            }
+        }
+    }
 }
 
 fn orbit_camera_system(
